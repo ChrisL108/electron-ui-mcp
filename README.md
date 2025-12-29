@@ -10,6 +10,7 @@ This package provides a Model Context Protocol (MCP) server that enables AI assi
 - **Lazy initialization** - App launches automatically on first tool call
 - **Lifecycle guards** - State machine ensures tools only run when app is ready
 - **Snapshot-based element addressing** - ARIA tree snapshots with element refs (`e0`, `e1`, etc.)
+- **Annotated screenshots** - Overlay ref labels on screenshots for visual debugging
 - **Dev and packaged app support** - Works with both development builds and packaged executables
 - **Electron-specific tools** - Additional `electron_*` tools for main process access
 
@@ -17,6 +18,26 @@ This package provides a Model Context Protocol (MCP) server that enables AI assi
 
 ```bash
 npm install electron-ui-mcp
+```
+
+## Quick Start
+
+### Add to Claude Code
+
+```bash
+claude mcp add electron-ui-mcp -- npx electron-ui-mcp --dev .vite/build/main.js --cwd /path/to/your-electron-app
+```
+
+### Add to Codex CLI
+
+```bash
+codex mcp add electron-ui-mcp -- npx electron-ui-mcp --dev .vite/build/main.js --cwd /path/to/your-electron-app
+```
+
+### Add to Gemini CLI
+
+```bash
+gemini mcp add electron-ui-mcp -- npx electron-ui-mcp --dev .vite/build/main.js --cwd /path/to/your-electron-app
 ```
 
 ## Usage
@@ -40,9 +61,26 @@ electron-ui-mcp --packaged "C:\Program Files\MyApp\MyApp.exe"
 electron-ui-mcp --dev .vite/build/main.js --isolated --e2e
 ```
 
-### Claude Desktop Configuration
+### CLI Options
 
-Add to your Claude Desktop config (`~/.claude.json` or similar):
+```
+Options:
+  --dev <path>           Launch dev mode with main.js entry
+  --packaged <path>      Launch packaged app executable
+  --cwd <path>           Working directory
+  --user-data-dir <path> Custom userData directory
+  --isolated             Use isolated temp userData
+  --dev-server <url>     Dev server URL for renderer
+  --e2e                  Enable E2E mode
+  --timeout <ms>         Launch timeout (default: 60000)
+  --config <path>        Path to config file
+```
+
+## Configuration
+
+### Claude Desktop
+
+Add to your Claude Desktop config (`~/.claude.json`):
 
 ```json
 {
@@ -53,6 +91,46 @@ Add to your Claude Desktop config (`~/.claude.json` or similar):
       "cwd": "/path/to/your-electron-app"
     }
   }
+}
+```
+
+### Codex CLI
+
+Codex stores MCP config in `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.electron]
+command = "npx"
+args = ["electron-ui-mcp", "--dev", ".vite/build/main.js", "--cwd", "/path/to/your-electron-app"]
+```
+
+### Gemini CLI
+
+Gemini stores MCP config in `~/.gemini/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "electron": {
+      "command": "npx",
+      "args": ["electron-ui-mcp", "--dev", ".vite/build/main.js", "--cwd", "/path/to/your-electron-app"]
+    }
+  }
+}
+```
+
+### Configuration File
+
+Create `electron-ui-mcp.json` in your project root:
+
+```json
+{
+  "mode": "dev",
+  "appPath": ".vite/build/main.js",
+  "rendererUrl": "http://localhost:5173",
+  "isolated": true,
+  "e2e": true,
+  "timeout": 60000
 }
 ```
 
@@ -77,7 +155,7 @@ Add to your Claude Desktop config (`~/.claude.json` or similar):
 | `browser_navigate` | Navigate to URL |
 | `browser_navigate_back` | Go back in history |
 | `browser_snapshot` | Capture accessibility tree with refs |
-| `browser_take_screenshot` | Take visual screenshot (with optional ref annotations) |
+| `browser_take_screenshot` | Take screenshot (with optional ref annotations) |
 | `browser_click` | Click element by ref |
 | `browser_type` | Type into element |
 | `browser_press_key` | Press keyboard key |
@@ -143,7 +221,28 @@ Use `browser_take_screenshot` with `annotate: true` to overlay ref labels on the
 }
 ```
 
-This draws red boxes and ref labels (e0, e1, etc.) at each element's position, making it easy to visually identify which ref corresponds to which UI element. If no snapshot has been taken yet, one will be captured automatically.
+This draws red highlight boxes and ref labels (e0, e1, etc.) at each element's position, making it easy to visually identify which ref corresponds to which UI element:
+
+```
+┌─────────────────────────────────┐
+│  e0                             │
+│  ┌───────────────────────────┐  │
+│  │     Welcome to App        │  │
+│  └───────────────────────────┘  │
+│                                 │
+│  e1                e2           │
+│  ┌──────┐  ┌─────────────────┐  │
+│  │Email │  │_________________│  │
+│  └──────┘  └─────────────────┘  │
+│                                 │
+│             e3                  │
+│           ┌────────┐            │
+│           │ Submit │            │
+│           └────────┘            │
+└─────────────────────────────────┘
+```
+
+If no snapshot has been taken yet, one will be captured automatically before annotating.
 
 ### Lifecycle States
 
@@ -155,36 +254,6 @@ The server manages these states:
 - `closed` - App was closed
 
 Tools automatically launch the app if needed (lazy initialization).
-
-## CLI Options
-
-```
-Options:
-  --dev <path>           Launch dev mode with main.js entry
-  --packaged <path>      Launch packaged app executable
-  --cwd <path>           Working directory
-  --user-data-dir <path> Custom userData directory
-  --isolated             Use isolated temp userData
-  --dev-server <url>     Dev server URL for renderer
-  --e2e                  Enable E2E mode
-  --timeout <ms>         Launch timeout
-  --config <path>        Path to config file
-```
-
-## Configuration File
-
-Create `electron-ui-mcp.json` in your project:
-
-```json
-{
-  "mode": "dev",
-  "appPath": ".vite/build/main.js",
-  "rendererUrl": "http://localhost:5173",
-  "isolated": true,
-  "e2e": true,
-  "timeout": 60000
-}
-```
 
 ## Programmatic Usage
 
