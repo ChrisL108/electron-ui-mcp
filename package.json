@@ -1,0 +1,25 @@
+{
+    "name": "electron-ui-mcp",
+    "version": "0.0.1",
+    "description": "Electron UI automation MCP server (WIP)",
+    "main": "index.js",
+    "license": "MIT",
+    "keywords": [
+        "mcp",
+        "electron",
+        "playwright",
+        "automation"
+    ],
+    "author": "ChrisL108",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/ChrisL108/electron-ui-mcp.git"
+    },
+    "bugs": {
+        "url": "https://github.com/ChrisL108/electron-ui-mcp/issues"
+    },
+    "homepage": "https://github.com/ChrisL108/electron-ui-mcp#readme",
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1"
+    }
+}
