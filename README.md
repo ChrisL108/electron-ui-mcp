@@ -77,7 +77,7 @@ Add to your Claude Desktop config (`~/.claude.json` or similar):
 | `browser_navigate` | Navigate to URL |
 | `browser_navigate_back` | Go back in history |
 | `browser_snapshot` | Capture accessibility tree with refs |
-| `browser_take_screenshot` | Take visual screenshot |
+| `browser_take_screenshot` | Take visual screenshot (with optional ref annotations) |
 | `browser_click` | Click element by ref |
 | `browser_type` | Type into element |
 | `browser_press_key` | Press keyboard key |
@@ -129,6 +129,21 @@ Use these refs with interaction tools:
 ```
 
 **Important**: Refs are invalidated when a new snapshot is taken. Always take a fresh snapshot before interacting with elements.
+
+### Annotated Screenshots
+
+Use `browser_take_screenshot` with `annotate: true` to overlay ref labels on the screenshot:
+
+```json
+{
+  "name": "browser_take_screenshot",
+  "arguments": {
+    "annotate": true
+  }
+}
+```
+
+This draws red boxes and ref labels (e0, e1, etc.) at each element's position, making it easy to visually identify which ref corresponds to which UI element. If no snapshot has been taken yet, one will be captured automatically.
 
 ### Lifecycle States
 

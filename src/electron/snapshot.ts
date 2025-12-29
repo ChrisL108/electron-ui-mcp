@@ -8,11 +8,19 @@
 import type { Page } from 'playwright';
 import { refManager } from '../utils/refs';
 
+export interface BoundingBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface SnapshotElement {
   ref: string;
   role: string;
   name: string;
   level?: number;
+  bounds?: BoundingBox;
   children?: SnapshotElement[];
 }
 
@@ -24,12 +32,23 @@ export interface SnapshotResult {
   text: string; // Human-readable text format
 }
 
+// Store bounding boxes for annotation
+let currentBoundingBoxes: Map<string, BoundingBox> = new Map();
+
+/**
+ * Get bounding boxes from the last snapshot
+ */
+export function getBoundingBoxes(): Map<string, BoundingBox> {
+  return currentBoundingBoxes;
+}
+
 /**
  * Capture an accessibility snapshot of the page
  */
 export async function captureSnapshot(page: Page): Promise<SnapshotResult> {
   // Start new snapshot session (invalidates old refs)
   const snapshotId = refManager.startNewSnapshot();
+  currentBoundingBoxes = new Map();
 
   const title = await page.title();
   const url = page.url();
@@ -59,8 +78,8 @@ export async function captureSnapshot(page: Page): Promise<SnapshotResult> {
       }
 
       // Try title attribute
-      const title = el.getAttribute('title');
-      if (title) return title;
+      const titleAttr = el.getAttribute('title');
+      if (titleAttr) return titleAttr;
 
       // Try alt for images
       if (el instanceof HTMLImageElement) {
@@ -182,7 +201,19 @@ export async function captureSnapshot(page: Page): Promise<SnapshotResult> {
       name: string;
       level?: number;
       testId?: string;
+      bounds?: { x: number; y: number; width: number; height: number };
       children?: TreeNode[];
+    }
+
+    function getBounds(el: Element): { x: number; y: number; width: number; height: number } | undefined {
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) return undefined;
+      return {
+        x: Math.round(rect.x),
+        y: Math.round(rect.y),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+      };
     }
 
     function buildTree(el: Element, depth = 0): TreeNode | null {
@@ -231,6 +262,12 @@ export async function captureSnapshot(page: Page): Promise<SnapshotResult> {
 
       if (testId) {
         node.testId = testId;
+      }
+
+      // Capture bounding box for annotation
+      const bounds = getBounds(el);
+      if (bounds) {
+        node.bounds = bounds;
       }
 
       if (children.length > 0) {
@@ -288,6 +325,7 @@ interface RawNode {
   name: string;
   level?: number;
   testId?: string;
+  bounds?: BoundingBox;
   children?: RawNode[];
 }
 
@@ -310,6 +348,12 @@ function processNodes(nodes: RawNode[]): SnapshotElement[] {
 
       if (node.level !== undefined) {
         element.level = node.level;
+      }
+
+      // Store bounding box for annotations
+      if (node.bounds) {
+        element.bounds = node.bounds;
+        currentBoundingBoxes.set(ref, node.bounds);
       }
 
       if (node.children && node.children.length > 0) {
@@ -354,6 +398,83 @@ function generateTextOutput(
 }
 
 /**
+ * Inject annotation overlays onto the page
+ */
+export async function injectAnnotations(page: Page): Promise<void> {
+  const boxes = Array.from(currentBoundingBoxes.entries());
+
+  if (boxes.length === 0) {
+    return;
+  }
+
+  await page.evaluate((annotations: Array<[string, BoundingBox]>) => {
+    // Create container for annotations
+    const container = document.createElement('div');
+    container.id = '__electron_mcp_annotations__';
+    container.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 2147483647;
+    `;
+
+    for (const [ref, bounds] of annotations) {
+      // Create highlight box
+      const highlight = document.createElement('div');
+      highlight.style.cssText = `
+        position: fixed;
+        left: ${bounds.x}px;
+        top: ${bounds.y}px;
+        width: ${bounds.width}px;
+        height: ${bounds.height}px;
+        border: 2px solid rgba(255, 107, 107, 0.8);
+        background: rgba(255, 107, 107, 0.1);
+        box-sizing: border-box;
+        pointer-events: none;
+      `;
+
+      // Create ref label
+      const label = document.createElement('div');
+      label.textContent = ref;
+      label.style.cssText = `
+        position: fixed;
+        left: ${bounds.x}px;
+        top: ${Math.max(0, bounds.y - 18)}px;
+        background: rgba(255, 107, 107, 0.95);
+        color: white;
+        font-family: monospace;
+        font-size: 11px;
+        font-weight: bold;
+        padding: 1px 4px;
+        border-radius: 2px;
+        pointer-events: none;
+        white-space: nowrap;
+      `;
+
+      container.appendChild(highlight);
+      container.appendChild(label);
+    }
+
+    document.body.appendChild(container);
+  }, boxes);
+}
+
+/**
+ * Remove annotation overlays from the page
+ */
+export async function removeAnnotations(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const container = document.getElementById('__electron_mcp_annotations__');
+    if (container) {
+      container.remove();
+    }
+  });
+}
+
+/**
  * Take a screenshot of the page
  */
 export async function takeScreenshot(
@@ -362,11 +483,33 @@ export async function takeScreenshot(
     fullPage?: boolean;
     type?: 'png' | 'jpeg';
     quality?: number;
+    annotate?: boolean;
   } = {}
 ): Promise<Buffer> {
-  return page.screenshot({
-    fullPage: options.fullPage ?? false,
-    type: options.type ?? 'png',
-    quality: options.type === 'jpeg' ? (options.quality ?? 80) : undefined,
-  });
+  const { annotate = false, ...screenshotOptions } = options;
+
+  // If annotating, ensure we have bounding boxes and inject overlays
+  if (annotate) {
+    // If no snapshot taken yet, take one to get bounding boxes
+    if (currentBoundingBoxes.size === 0) {
+      await captureSnapshot(page);
+    }
+
+    await injectAnnotations(page);
+  }
+
+  try {
+    const buffer = await page.screenshot({
+      fullPage: screenshotOptions.fullPage ?? false,
+      type: screenshotOptions.type ?? 'png',
+      quality: screenshotOptions.type === 'jpeg' ? (screenshotOptions.quality ?? 80) : undefined,
+    });
+
+    return buffer;
+  } finally {
+    // Always clean up annotations
+    if (annotate) {
+      await removeAnnotations(page);
+    }
+  }
 }

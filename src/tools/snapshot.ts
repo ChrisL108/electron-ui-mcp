@@ -35,7 +35,7 @@ export const snapshotTools: ToolDefinition[] = [
   {
     name: 'browser_take_screenshot',
     description:
-      'Take a screenshot of the current page. Returns base64-encoded image data.',
+      'Take a screenshot of the current page. Returns base64-encoded image data. Use annotate=true to overlay element refs (e0, e1, etc.) on the screenshot for visual debugging.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -52,27 +52,34 @@ export const snapshotTools: ToolDefinition[] = [
           type: 'number',
           description: 'JPEG quality 0-100 (only for jpeg, default: 80)',
         },
+        annotate: {
+          type: 'boolean',
+          description:
+            'Overlay element refs on the screenshot. Shows red boxes with ref labels (e0, e1, etc.) at each element position. Takes a snapshot first if needed. (default: false)',
+        },
       },
     },
     annotations: {
       readOnlyHint: true,
-      idempotentHint: true,
+      idempotentHint: false, // annotate=true can take a new snapshot
     },
     handler: async (args) => {
-      const { fullPage, type, quality } = args as {
+      const { fullPage, type, quality, annotate } = args as {
         fullPage?: boolean;
         type?: 'png' | 'jpeg';
         quality?: number;
+        annotate?: boolean;
       };
 
       const ctx = getGlobalContext();
       const page = await ctx.getPage();
 
-      const buffer = await takeScreenshot(page, { fullPage, type, quality });
+      const buffer = await takeScreenshot(page, { fullPage, type, quality, annotate });
 
       return {
         format: type || 'png',
         data: buffer.toString('base64'),
+        annotated: annotate ?? false,
       };
     },
   },
