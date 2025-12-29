@@ -14,13 +14,9 @@ This package provides a Model Context Protocol (MCP) server that enables AI assi
 - **Dev and packaged app support** - Works with both development builds and packaged executables
 - **Electron-specific tools** - Additional `electron_*` tools for main process access
 
-## Installation
-
-```bash
-npm install electron-ui-mcp
-```
-
 ## Quick Start
+
+No installation required - use `npx` directly:
 
 ### Add to Claude Code
 
@@ -256,6 +252,14 @@ The server manages these states:
 Tools automatically launch the app if needed (lazy initialization).
 
 ## Programmatic Usage
+
+Install as a dependency:
+
+```bash
+npm install electron-ui-mcp
+```
+
+Then use in your code:
 
 ```typescript
 import { createServer, resolveConfig } from 'electron-ui-mcp';
