@@ -1,0 +1,372 @@
+/**
+ * ARIA Snapshot system - captures accessibility tree with refs
+ *
+ * The snapshot provides element refs (e0, e1, etc.) that can be used
+ * with interaction tools like browser_click and browser_type.
+ */
+
+import type { Page } from 'playwright';
+import { refManager } from '../utils/refs';
+
+export interface SnapshotElement {
+  ref: string;
+  role: string;
+  name: string;
+  level?: number;
+  children?: SnapshotElement[];
+}
+
+export interface SnapshotResult {
+  snapshotId: string;
+  title: string;
+  url: string;
+  tree: SnapshotElement[];
+  text: string; // Human-readable text format
+}
+
+/**
+ * Capture an accessibility snapshot of the page
+ */
+export async function captureSnapshot(page: Page): Promise<SnapshotResult> {
+  // Start new snapshot session (invalidates old refs)
+  const snapshotId = refManager.startNewSnapshot();
+
+  const title = await page.title();
+  const url = page.url();
+
+  // Get accessibility tree by evaluating in the page
+  // This approach works across all Playwright versions
+  const rawTree = await page.evaluate(() => {
+    function getAccessibleName(el: Element): string {
+      // Try aria-label first
+      const ariaLabel = el.getAttribute('aria-label');
+      if (ariaLabel) return ariaLabel;
+
+      // Try aria-labelledby
+      const labelledBy = el.getAttribute('aria-labelledby');
+      if (labelledBy) {
+        const labelEl = document.getElementById(labelledBy);
+        if (labelEl) return labelEl.textContent?.trim() || '';
+      }
+
+      // Try associated label for form elements
+      if (el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement) {
+        const id = el.id;
+        if (id) {
+          const label = document.querySelector(`label[for="${id}"]`);
+          if (label) return label.textContent?.trim() || '';
+        }
+      }
+
+      // Try title attribute
+      const title = el.getAttribute('title');
+      if (title) return title;
+
+      // Try alt for images
+      if (el instanceof HTMLImageElement) {
+        return el.alt || '';
+      }
+
+      // Try button/link text content
+      if (el instanceof HTMLButtonElement || el instanceof HTMLAnchorElement) {
+        return el.textContent?.trim() || '';
+      }
+
+      // Try value for inputs
+      if (el instanceof HTMLInputElement) {
+        if (el.type === 'submit' || el.type === 'button') {
+          return el.value || '';
+        }
+      }
+
+      return '';
+    }
+
+    function getRole(el: Element): string {
+      // Explicit ARIA role takes precedence
+      const explicitRole = el.getAttribute('role');
+      if (explicitRole) return explicitRole;
+
+      // Implicit roles based on element type
+      const tagName = el.tagName.toLowerCase();
+      const roleMap: Record<string, string> = {
+        'a': 'link',
+        'button': 'button',
+        'input': getInputRole(el as HTMLInputElement),
+        'select': 'combobox',
+        'textarea': 'textbox',
+        'img': 'img',
+        'h1': 'heading',
+        'h2': 'heading',
+        'h3': 'heading',
+        'h4': 'heading',
+        'h5': 'heading',
+        'h6': 'heading',
+        'nav': 'navigation',
+        'main': 'main',
+        'header': 'banner',
+        'footer': 'contentinfo',
+        'aside': 'complementary',
+        'section': 'region',
+        'article': 'article',
+        'form': 'form',
+        'table': 'table',
+        'ul': 'list',
+        'ol': 'list',
+        'li': 'listitem',
+        'dialog': 'dialog',
+        'menu': 'menu',
+        'menuitem': 'menuitem',
+      };
+
+      return roleMap[tagName] || '';
+    }
+
+    function getInputRole(input: HTMLInputElement): string {
+      const typeRoles: Record<string, string> = {
+        'button': 'button',
+        'submit': 'button',
+        'reset': 'button',
+        'checkbox': 'checkbox',
+        'radio': 'radio',
+        'range': 'slider',
+        'search': 'searchbox',
+        'text': 'textbox',
+        'email': 'textbox',
+        'password': 'textbox',
+        'tel': 'textbox',
+        'url': 'textbox',
+        'number': 'spinbutton',
+      };
+      return typeRoles[input.type] || 'textbox';
+    }
+
+    function getHeadingLevel(el: Element): number | undefined {
+      const tagName = el.tagName.toLowerCase();
+      const levelMatch = tagName.match(/^h([1-6])$/);
+      if (levelMatch) {
+        return parseInt(levelMatch[1], 10);
+      }
+      const ariaLevel = el.getAttribute('aria-level');
+      if (ariaLevel) {
+        return parseInt(ariaLevel, 10);
+      }
+      return undefined;
+    }
+
+    function isInteractive(el: Element): boolean {
+      const tagName = el.tagName.toLowerCase();
+      const interactiveTags = ['a', 'button', 'input', 'select', 'textarea'];
+      if (interactiveTags.includes(tagName)) return true;
+
+      const role = el.getAttribute('role');
+      const interactiveRoles = [
+        'button', 'link', 'checkbox', 'radio', 'menuitem', 'menuitemcheckbox',
+        'menuitemradio', 'option', 'tab', 'switch', 'slider', 'spinbutton',
+        'textbox', 'searchbox', 'combobox', 'listbox', 'tree', 'treegrid',
+        'grid', 'row', 'cell', 'gridcell', 'scrollbar',
+      ];
+      if (role && interactiveRoles.includes(role)) return true;
+
+      // Check tabindex
+      if (el.getAttribute('tabindex') !== null) return true;
+
+      // Check click handler (approximate)
+      if (el.getAttribute('onclick') !== null) return true;
+
+      return false;
+    }
+
+    interface TreeNode {
+      role: string;
+      name: string;
+      level?: number;
+      testId?: string;
+      children?: TreeNode[];
+    }
+
+    function buildTree(el: Element, depth = 0): TreeNode | null {
+      // Skip hidden elements
+      const style = window.getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden') {
+        return null;
+      }
+
+      // Skip elements with aria-hidden
+      if (el.getAttribute('aria-hidden') === 'true') {
+        return null;
+      }
+
+      const role = getRole(el);
+      const name = getAccessibleName(el);
+      const testId = el.getAttribute('data-testid') || undefined;
+
+      // Collect children
+      const children: TreeNode[] = [];
+      for (const child of el.children) {
+        const childNode = buildTree(child, depth + 1);
+        if (childNode) {
+          children.push(childNode);
+        }
+      }
+
+      // Skip non-interesting nodes (no role, no name, no interactivity)
+      // unless they have interesting children
+      if (!role && !name && !isInteractive(el) && children.length === 0) {
+        return null;
+      }
+
+      // If this node has no role/name but has children, return children directly
+      if (!role && !name && children.length > 0) {
+        // Flatten - return null but children should be collected at parent level
+        return null;
+      }
+
+      const node: TreeNode = { role, name };
+
+      const level = getHeadingLevel(el);
+      if (level !== undefined) {
+        node.level = level;
+      }
+
+      if (testId) {
+        node.testId = testId;
+      }
+
+      if (children.length > 0) {
+        node.children = children;
+      }
+
+      return node;
+    }
+
+    function collectNodes(el: Element): TreeNode[] {
+      const result: TreeNode[] = [];
+
+      const style = window.getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden') {
+        return result;
+      }
+
+      if (el.getAttribute('aria-hidden') === 'true') {
+        return result;
+      }
+
+      const node = buildTree(el);
+      if (node) {
+        result.push(node);
+      } else {
+        // Collect from children if current node is not interesting
+        for (const child of el.children) {
+          result.push(...collectNodes(child));
+        }
+      }
+
+      return result;
+    }
+
+    return collectNodes(document.body);
+  });
+
+  // Process the raw tree and assign refs
+  const tree = processNodes(rawTree as RawNode[]);
+
+  // Generate human-readable text
+  const text = generateTextOutput(tree);
+
+  return {
+    snapshotId,
+    title,
+    url,
+    tree,
+    text,
+  };
+}
+
+interface RawNode {
+  role: string;
+  name: string;
+  level?: number;
+  testId?: string;
+  children?: RawNode[];
+}
+
+/**
+ * Process raw nodes and assign refs
+ */
+function processNodes(nodes: RawNode[]): SnapshotElement[] {
+  const results: SnapshotElement[] = [];
+
+  for (const node of nodes) {
+    // Only assign refs to nodes that have a role or are interesting
+    if (node.role || node.name) {
+      const ref = refManager.registerElement(node.role, node.name, node.testId);
+
+      const element: SnapshotElement = {
+        ref,
+        role: node.role || 'generic',
+        name: node.name,
+      };
+
+      if (node.level !== undefined) {
+        element.level = node.level;
+      }
+
+      if (node.children && node.children.length > 0) {
+        const childElements = processNodes(node.children);
+        if (childElements.length > 0) {
+          element.children = childElements;
+        }
+      }
+
+      results.push(element);
+    } else if (node.children) {
+      // Process children even if this node is not interesting
+      results.push(...processNodes(node.children));
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Generate human-readable text output
+ */
+function generateTextOutput(
+  elements: SnapshotElement[],
+  indent = 0
+): string {
+  const lines: string[] = [];
+  const prefix = '  '.repeat(indent);
+
+  for (const element of elements) {
+    const namePart = element.name ? ` "${element.name}"` : '';
+    const levelPart = element.level !== undefined ? ` [level ${element.level}]` : '';
+
+    lines.push(`${prefix}- [${element.ref}] ${element.role}${namePart}${levelPart}`);
+
+    if (element.children) {
+      lines.push(generateTextOutput(element.children, indent + 1));
+    }
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Take a screenshot of the page
+ */
+export async function takeScreenshot(
+  page: Page,
+  options: {
+    fullPage?: boolean;
+    type?: 'png' | 'jpeg';
+    quality?: number;
+  } = {}
+): Promise<Buffer> {
+  return page.screenshot({
+    fullPage: options.fullPage ?? false,
+    type: options.type ?? 'png',
+    quality: options.type === 'jpeg' ? (options.quality ?? 80) : undefined,
+  });
+}
