@@ -202,7 +202,7 @@ Use these refs with interaction tools:
 }
 ```
 
-**Important**: Refs are invalidated when a new snapshot is taken. Always take a fresh snapshot before interacting with elements.
+**Important**: Refs are invalidated when a new snapshot is taken or when switching between windows. Always take a fresh snapshot before interacting with elements.
 
 ### Annotated Screenshots
 
@@ -217,7 +217,9 @@ Use `browser_take_screenshot` with `annotate: true` to overlay ref labels on the
 }
 ```
 
-This draws red highlight boxes and ref labels (e0, e1, etc.) at each element's position, making it easy to visually identify which ref corresponds to which UI element:
+This draws red highlight boxes and ref labels (e0, e1, etc.) at each element's position, making it easy to visually identify which ref corresponds to which UI element.
+
+**Note**: If no snapshot has been taken yet, `annotate: true` will automatically capture one, which generates new refs. This can invalidate refs from a previous snapshot.
 
 ```
 ┌─────────────────────────────────┐
@@ -271,6 +273,20 @@ const config = resolveConfig({
 
 const server = createServer(config);
 ```
+
+## Security Considerations
+
+### Main Process Code Execution
+
+The `electron_evaluate_main` tool executes arbitrary JavaScript in the Electron main process. This is intentionally powerful for automation but should only be used in trusted environments. The main process has full Node.js and system access.
+
+### Environment Variable Passthrough
+
+By default, all environment variables from the host process are passed to the launched Electron app. This can unintentionally expose secrets if the app logs or exposes environment variables. Use `--isolated` mode or set specific variables via the config to limit exposure.
+
+### File Access
+
+The `browser_file_upload` tool can read arbitrary local files. This is expected behavior for automation but worth noting when exposing this server to untrusted callers.
 
 ## Requirements
 

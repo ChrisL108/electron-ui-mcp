@@ -43,9 +43,10 @@ export const windowTools: ToolDefinition[] = [
 
       if (action === 'list') {
         const windows = await ctx.getWindows();
+        const activeIndex = await ctx.getCurrentWindowIndex();
         return {
           windows,
-          activeIndex: windows.findIndex((w) => !w.isClosed),
+          activeIndex,
         };
       }
 
@@ -250,7 +251,15 @@ export const windowTools: ToolDefinition[] = [
       let requests = ctx.getNetworkRequests(limit);
 
       if (urlPattern) {
-        const regex = new RegExp(urlPattern);
+        let regex: RegExp;
+        try {
+          regex = new RegExp(urlPattern);
+        } catch (e) {
+          return {
+            error: `Invalid regex pattern: ${urlPattern}`,
+            suggestion: 'Check your regex syntax. Common issues: unescaped special characters like (, ), [, ]',
+          };
+        }
         requests = requests.filter((r) => regex.test(r.url));
       }
 

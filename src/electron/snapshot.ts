@@ -43,6 +43,13 @@ export function getBoundingBoxes(): Map<string, BoundingBox> {
 }
 
 /**
+ * Clear bounding boxes (call on window switch)
+ */
+export function clearBoundingBoxes(): void {
+  currentBoundingBoxes = new Map();
+}
+
+/**
  * Capture an accessibility snapshot of the page
  */
 export async function captureSnapshot(page: Page): Promise<SnapshotResult> {

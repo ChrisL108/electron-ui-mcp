@@ -14,6 +14,7 @@ import * as path from 'path';
 import { Config, resolveAppPath } from '../config';
 import { AppNotReadyError, LaunchError, NoWindowError } from '../utils/errors';
 import { refManager } from '../utils/refs';
+import { clearBoundingBoxes } from './snapshot';
 
 export type ContextState = 'idle' | 'launching' | 'ready' | 'error' | 'closed';
 
@@ -46,6 +47,8 @@ export class ElectronContext {
     status?: number;
     timestamp: number;
   }> = [];
+  // Track pages with attached handlers to prevent duplicates
+  private pagesWithHandlers: WeakSet<Page> = new WeakSet();
 
   constructor(config: Config) {
     this.config = config;
@@ -190,9 +193,15 @@ export class ElectronContext {
   }
 
   /**
-   * Set up event handlers for a page
+   * Set up event handlers for a page (idempotent - skips if already attached)
    */
   private setupPageHandlers(page: Page): void {
+    // Skip if handlers already attached to this page
+    if (this.pagesWithHandlers.has(page)) {
+      return;
+    }
+    this.pagesWithHandlers.add(page);
+
     // Dialog handling
     page.on('dialog', async (dialog) => {
       this.pendingDialogs.push({
@@ -261,6 +270,7 @@ export class ElectronContext {
 
   /**
    * Get the current page, throwing if none available
+   * NOTE: If current page is closed and we fall back to another window, refs are invalidated
    */
   async getPage(): Promise<Page> {
     await this.ensureReady();
@@ -272,6 +282,9 @@ export class ElectronContext {
         if (!win.isClosed()) {
           this.currentPage = win;
           this.setupPageHandlers(win);
+          // Clear refs when falling back to a different window
+          refManager.clear();
+          clearBoundingBoxes();
           return win;
         }
       }
@@ -326,12 +339,34 @@ export class ElectronContext {
   }
 
   /**
+   * Get index of the current active window
+   */
+  async getCurrentWindowIndex(): Promise<number> {
+    await this.ensureReady();
+
+    if (!this.currentPage) {
+      return -1;
+    }
+
+    const windows = this.app?.windows() ?? [];
+    for (let i = 0; i < windows.length; i++) {
+      if (windows[i] === this.currentPage) {
+        return i;
+      }
+    }
+
+    return -1;
+  }
+
+  /**
    * Select a window by index or title
+   * NOTE: Selecting a different window invalidates refs from previous snapshots
    */
   async selectWindow(selector: { index?: number; title?: string }): Promise<void> {
     await this.ensureReady();
 
     const windows = this.app?.windows() ?? [];
+    const previousPage = this.currentPage;
 
     if (selector.index !== undefined) {
       if (selector.index < 0 || selector.index >= windows.length) {
@@ -339,6 +374,11 @@ export class ElectronContext {
       }
       this.currentPage = windows[selector.index];
       this.setupPageHandlers(this.currentPage);
+      // Clear refs when switching to a different window
+      if (previousPage !== this.currentPage) {
+        refManager.clear();
+        clearBoundingBoxes();
+      }
       return;
     }
 
@@ -348,6 +388,11 @@ export class ElectronContext {
         if (title === selector.title || title.includes(selector.title)) {
           this.currentPage = win;
           this.setupPageHandlers(win);
+          // Clear refs when switching to a different window
+          if (previousPage !== this.currentPage) {
+            refManager.clear();
+            clearBoundingBoxes();
+          }
           return;
         }
       }
@@ -422,7 +467,9 @@ export class ElectronContext {
     this.pendingDialogs = [];
     this.consoleMessages = [];
     this.networkRequests = [];
+    this.pagesWithHandlers = new WeakSet();
     refManager.clear();
+    clearBoundingBoxes();
   }
 
 }

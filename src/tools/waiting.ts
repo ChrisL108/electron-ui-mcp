@@ -61,7 +61,8 @@ export const waitingTools: ToolDefinition[] = [
 
       try {
         if (text) {
-          await page.waitForSelector(`text=${text}`, { timeout, state });
+          // Use getByText for proper escaping instead of raw selector interpolation
+          await page.getByText(text).waitFor({ timeout, state });
           return { success: true, waited: 'text', value: text };
         }
 
