@@ -1,5 +1,9 @@
 # electron-ui-mcp
 
+> **⚠️ WARNING: This project is under active development and not ready for production use.**
+>
+> APIs, tool names, and configuration formats may change without notice. See [docs/plans/multi-app-support.md](docs/plans/multi-app-support.md) for upcoming changes.
+
 Electron UI automation MCP server with Playwright-style primitives.
 
 This package provides a Model Context Protocol (MCP) server that enables AI assistants to automate Electron desktop applications using a familiar Playwright-like API.
